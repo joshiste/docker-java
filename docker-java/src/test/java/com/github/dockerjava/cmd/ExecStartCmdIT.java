@@ -8,6 +8,8 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.security.SecureRandom;
 
@@ -94,5 +96,35 @@ public class ExecStartCmdIT extends CmdIT {
                 .exec(new ExecStartResultCallback(System.out, System.err)).awaitCompletion();
 
         dockerRule.getClient().copyArchiveFromContainerCmd(container.getId(), "/execStartTest.log").exec();
+    }
+
+    @Test(timeout = 20_000L)
+    public void execStartWithStdIn() throws Exception {
+        assumeNotSwarm("no network in swarm", dockerRule);
+
+        String containerName = "generated_" + new SecureRandom().nextInt();
+
+        CreateContainerResponse container = dockerRule.getClient().createContainerCmd("busybox").withCmd("top")
+            .withName(containerName).exec();
+        LOG.info("Created container {}", container.toString());
+        assertThat(container.getId(), not(is(emptyString())));
+
+        dockerRule.getClient().startContainerCmd(container.getId()).exec();
+
+        ExecCreateCmdResponse execCreateCmdResponse = dockerRule.getClient().execCreateCmd(container.getId())
+            .withAttachStdout(true)
+            .withAttachStdin(true)
+            .withCmd("cat")
+            .withUser("root")
+            .exec();
+
+        ByteArrayOutputStream stdOut = new ByteArrayOutputStream();
+
+        dockerRule.getClient().execStartCmd(execCreateCmdResponse.getId())
+            .withStdIn(new ByteArrayInputStream("Hello World!".getBytes()))
+            .exec(new ExecStartResultCallback(stdOut, System.err))
+            .awaitCompletion();
+
+        assertThat(stdOut.toString(), is("Hello World!"));
     }
 }
